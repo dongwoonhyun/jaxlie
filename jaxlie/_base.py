@@ -4,6 +4,7 @@ from typing import ClassVar, Generic, Tuple, Type, TypeVar, Union, overload
 import jax
 import numpy as onp
 from typing_extensions import final, override
+import jax_dataclasses as jdc
 
 from . import hints
 
@@ -42,6 +43,34 @@ class MatrixLieGroup(abc.ABC):
         raise NotImplementedError()
 
     # Shared implementations.
+
+    def __getitem__(self, key):
+        """Allow retrieving a subset of the aperture using [] indexing operator."""
+        return self.__class__(
+            **{f.name: self.__dict__[f.name][key] for f in jdc.fields(self)}
+        )
+
+    def __len__(self):
+        """Return the number of elements."""
+        return 1 if self.get_batch_axes() == () else self.wxyz_xyz.shape[0]
+
+    def __iter__(self):
+        """Default iterator over elements."""
+        for i in range(len(self)):
+            yield self[i]
+
+    def _reshape(self, batch_shape):
+        """Create a new instance of the same class, with reshaped batch axes.
+
+        The leading underscore is apparently necessary to avoid jax tracing.
+        """
+        return self.__class__(
+            **{
+                n: self.__dict__[n].reshape([*batch_shape, self.__dict__[n].shape[-1]])
+                for f in jdc.fields(self)  # Loop over jax_dataclass fields
+                if (n := f.name)  # Assign temporary variable
+            }
+        )
 
     @overload
     def __matmul__(self: GroupType, other: GroupType) -> GroupType:
