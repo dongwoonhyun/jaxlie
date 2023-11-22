@@ -36,34 +36,8 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
 
     @override
     def __repr__(self) -> str:
-        unit_complex = jnp.round(self.unit_complex_xy[..., :2], 5)
-        xy = jnp.round(self.unit_complex_xy[..., 2:], 5)
-        return f"{self.__class__.__name__}(unit_complex={unit_complex}, xy={xy})"
-
-    @override
-    def __repr__(self) -> str:
-        """Pretty-printing."""
-        unit_complex = jnp.reshape(jnp.round(self.unit_complex_xy[..., :2], 5), (-1, 2))
-        xy = jnp.reshape(jnp.round(self.unit_complex_xy[..., 2:], 5), (-1, 2))
-        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
-        # If size is too large, only print the first and last few elements
-        n = unit_complex.shape[0]
-        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
-        for r in ranges:
-            if r is None:
-                str += "\n..."
-            else:
-                # Print each element in the batch
-                for i in r:
-                    str += "\n%5d: unit_complex=[" % i
-                    for u in unit_complex[i]:
-                        str += " %+7.4f, " % u
-                    str = str[:-2] + "], xy=["
-                    for x in xy[i]:
-                        str += " %+7.4f, " % x
-                    str = str[:-2] + "], "
-        str = str[:-2] + ")"
-        return str
+        # Needed to avoid using the EnforcedAnnotationsMixin's __repr__.
+        return _base.MatrixLieGroup.__repr__(self)
 
     @staticmethod
     @autobatch

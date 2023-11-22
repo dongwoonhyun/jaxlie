@@ -35,27 +35,8 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def __repr__(self) -> str:
-        """Pretty-printing."""
-        quat = jnp.reshape(jnp.round(self.wxyz, 5), (-1, 4))
-        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
-        # If size is too large, only print the first and last few elements
-        n = quat.shape[0]
-        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
-        for r in ranges:
-            if r is None:
-                str += "\n..."
-            else:
-                # Print each element in the batch
-                for i in r:
-                    str += "\n%5d: wxyz=[" % i
-                    for q in quat[i]:
-                        try:  # Concrete values
-                            str += " %+7.4f, " % q
-                        except:  # Traced values
-                            str += " %s, " % q.dtype
-                    str = str[:-2] + "], "
-        str = str[:-2] + ")"
-        return str
+        # Needed to avoid using the EnforcedAnnotationsMixin's __repr__.
+        return _base.MatrixLieGroup.__repr__(self)
 
     @staticmethod
     def from_x_radians(theta: hints.Scalar) -> SO3:

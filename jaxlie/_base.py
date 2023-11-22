@@ -65,6 +65,32 @@ class MatrixLieGroup(abc.ABC):
         for i in range(len(self)):
             yield self[i]
 
+    def __repr__(self) -> str:
+        """Pretty-printing."""
+        data = {
+            n: jax.numpy.reshape(self.__dict__[n], (-1, self.__dict__[n].shape[-1]))
+            for f in jdc.fields(self)
+            if (n := f.name)
+        }
+        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
+        # If size is too large, only print the first and last few elements
+        n = data[list(data)[0]].shape[0]
+        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
+        for r in ranges:
+            if r is None:
+                str += "\n..."
+            else:
+                # Print each element in the batch
+                for i in r:
+                    str += "\n%5d: " % i
+                    for n, d in data.items():
+                        str += "%s=[" % n
+                        for e in d[i]:
+                            str += " %+7.4f, " % e
+                        str = str[:-2] + "], "
+        str = str[:-2] + ")"
+        return str
+
     def _reshape(self, batch_shape):
         """Create a new instance of the same class, with reshaped batch axes.
 
