@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from jax import numpy as jnp
 from jax.config import config
+from jaxlie.utils import reshape, stack
 
 import jaxlie
 
@@ -35,6 +36,14 @@ def sample_transform(Group: Type[T]) -> T:
         return cast(T, Group.exp(onp.random.randn(Group.tangent_dim) * 1e-7))
     else:
         assert False
+
+
+def sample_transform_batch(Group: Type[T], shape) -> T:
+    """Sample a random transform from a group."""
+
+    n = onp.prod(shape)
+    samples = stack([sample_transform(Group) for _ in range(n)])
+    return reshape(samples, shape)
 
 
 def general_group_test(
@@ -78,11 +87,11 @@ def assert_transforms_close(a: jaxlie.MatrixLieGroup, b: jaxlie.MatrixLieGroup):
     p1 = jnp.asarray(a.parameters())
     p2 = jnp.asarray(b.parameters())
     if isinstance(a, jaxlie.SO3):
-        p1 = p1 * jnp.sign(jnp.sum(p1))
-        p2 = p2 * jnp.sign(jnp.sum(p2))
+        p1 = p1 * jnp.sign(jnp.sum(p1, axis=-1, keepdims=True))
+        p2 = p2 * jnp.sign(jnp.sum(p2, axis=-1, keepdims=True))
     elif isinstance(a, jaxlie.SE3):
-        p1 = p1.at[:4].mul(jnp.sign(jnp.sum(p1[:4])))
-        p2 = p2.at[:4].mul(jnp.sign(jnp.sum(p2[:4])))
+        p1 = p1.at[..., :4].mul(jnp.sign(jnp.sum(p1[..., :4], axis=-1, keepdims=True)))
+        p2 = p2.at[..., :4].mul(jnp.sign(jnp.sum(p2[..., :4], axis=-1, keepdims=True)))
 
     # Make sure parameters are equal.
     assert_arrays_close(p1, p2)
