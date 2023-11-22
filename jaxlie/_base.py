@@ -7,6 +7,7 @@ from typing_extensions import final, override
 import jax_dataclasses as jdc
 
 from . import hints
+from .utils import autobatch
 
 GroupType = TypeVar("GroupType", bound="MatrixLieGroup")
 SEGroupType = TypeVar("SEGroupType", bound="SEBase")
@@ -46,6 +47,11 @@ class MatrixLieGroup(abc.ABC):
 
     def __getitem__(self, key):
         """Allow retrieving a subset of the aperture using [] indexing operator."""
+        if hasattr(key, "__iter__") and any([k == Ellipsis for k in key]):
+            # If the key has an ellipsis (i.e. "..."), make sure the data dimension is
+            # explicitly included via slice(None) (i.e. ":"). This assumes the actual
+            # data rank is always 1.
+            key = (*key, slice(None))
         return self.__class__(
             **{f.name: self.__dict__[f.name][key] for f in jdc.fields(self)}
         )
@@ -279,17 +285,20 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
     @final
     @override
     def apply(self, target: hints.Array) -> jax.Array:
-        return self.rotation() @ target + self.translation()  # type: ignore
+        fn = lambda s: s.rotation() @ target + s.translation()
+        return autobatch(fn)(self)  # type: ignore
 
     @final
     @override
     def multiply(self: SEGroupType, other: SEGroupType) -> SEGroupType:
-        return type(self).from_rotation_and_translation(
-            rotation=self.rotation() @ other.rotation(),
-            translation=(self.rotation() @ other.translation()) + self.translation(),
+        fn = lambda s: type(s).from_rotation_and_translation(
+            rotation=s.rotation() @ other.rotation(),
+            translation=(s.rotation() @ other.translation()) + s.translation(),
         )
+        return (autobatch)(fn)(self)
 
     @final
+    @autobatch
     @override
     def inverse(self: SEGroupType) -> SEGroupType:
         R_inv = self.rotation().inverse()
@@ -299,6 +308,7 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
         )
 
     @final
+    @autobatch
     @override
     def normalize(self: SEGroupType) -> SEGroupType:
         return type(self).from_rotation_and_translation(
