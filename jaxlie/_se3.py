@@ -6,12 +6,14 @@ import jax
 import jax_dataclasses as jdc
 from jax import numpy as jnp
 from typing_extensions import Annotated, override
+from functools import partial
 
 from . import _base, hints
 from ._so3 import SO3
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon, register_lie_group, autobatch
 
 
+@autobatch
 def _skew(omega: hints.Array) -> jax.Array:
     """Returns the skew-symmetric form of a length-3 vector."""
 
@@ -50,13 +52,33 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
 
     @override
     def __repr__(self) -> str:
-        quat = jnp.round(self.wxyz_xyz[..., :4], 5)
-        trans = jnp.round(self.wxyz_xyz[..., 4:], 5)
-        return f"{self.__class__.__name__}(wxyz={quat}, xyz={trans})"
+        """Pretty-printing."""
+        quat = jnp.reshape(jnp.round(self.wxyz_xyz[..., :4], 5), (-1, 4))
+        xyz = jnp.reshape(jnp.round(self.wxyz_xyz[..., 4:], 5), (-1, 3))
+        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
+        # If size is too large, only print the first and last few elements
+        n = quat.shape[0]
+        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
+        for r in ranges:
+            if r is None:
+                str += "\n..."
+            else:
+                # Print each element in the batch
+                for i in r:
+                    str += "\n%5d: wxyz=[" % i
+                    for q in quat[i]:
+                        str += " %+7.4f, " % q
+                    str = str[:-2] + "], xyz=["
+                    for x in xyz[i]:
+                        str += " %+7.4f, " % x
+                    str = str[:-2] + "], "
+        str = str[:-2] + ")"
+        return str
 
     # SE-specific.
 
     @staticmethod
+    @autobatch
     @override
     def from_rotation_and_translation(
         rotation: SO3,
@@ -81,6 +103,7 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
         return SE3(wxyz_xyz=jnp.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
 
     @staticmethod
+    @partial(autobatch, data_rank=2)
     @override
     def from_matrix(matrix: hints.Array) -> SE3:
         assert matrix.shape == (4, 4)
@@ -92,6 +115,7 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
 
     # Accessors.
 
+    @autobatch
     @override
     def as_matrix(self) -> jax.Array:
         return (
@@ -109,6 +133,7 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
     # Operations.
 
     @staticmethod
+    @autobatch
     @override
     def exp(tangent: hints.Array) -> SE3:
         # Reference:
@@ -153,6 +178,7 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
             translation=V @ tangent[:3],
         )
 
+    @autobatch
     @override
     def log(self) -> jax.Array:
         # Reference:
@@ -192,6 +218,7 @@ class SE3(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO3]):
         )
         return jnp.concatenate([V_inv @ self.translation(), omega])
 
+    @autobatch
     @override
     def adjoint(self) -> jax.Array:
         R = self.rotation().as_matrix()

@@ -4,9 +4,10 @@ import jax
 import jax_dataclasses as jdc
 from jax import numpy as jnp
 from typing_extensions import Annotated, override
+from functools import partial
 
 from . import _base, hints
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon, register_lie_group, autobatch
 
 
 @register_lie_group(
@@ -34,8 +35,27 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def __repr__(self) -> str:
-        wxyz = jnp.round(self.wxyz, 5)
-        return f"{self.__class__.__name__}(wxyz={wxyz})"
+        """Pretty-printing."""
+        quat = jnp.reshape(jnp.round(self.wxyz, 5), (-1, 4))
+        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
+        # If size is too large, only print the first and last few elements
+        n = quat.shape[0]
+        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
+        for r in ranges:
+            if r is None:
+                str += "\n..."
+            else:
+                # Print each element in the batch
+                for i in r:
+                    str += "\n%5d: wxyz=[" % i
+                    for q in quat[i]:
+                        try:  # Concrete values
+                            str += " %+7.4f, " % q
+                        except:  # Traced values
+                            str += " %s, " % q.dtype
+                    str = str[:-2] + "], "
+        str = str[:-2] + ")"
+        return str
 
     @staticmethod
     def from_x_radians(theta: hints.Scalar) -> SO3:
@@ -47,7 +67,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         Returns:
             Output.
         """
-        return SO3.exp(jnp.array([theta, 0.0, 0.0]))
+        return SO3.exp(jnp.stack([theta, 0 * theta, 0 * theta], axis=-1))
 
     @staticmethod
     def from_y_radians(theta: hints.Scalar) -> SO3:
@@ -59,7 +79,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         Returns:
             Output.
         """
-        return SO3.exp(jnp.array([0.0, theta, 0.0]))
+        return SO3.exp(jnp.stack([0 * theta, theta, 0 * theta], axis=-1))
 
     @staticmethod
     def from_z_radians(theta: hints.Scalar) -> SO3:
@@ -71,7 +91,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         Returns:
             Output.
         """
-        return SO3.exp(jnp.array([0.0, 0.0, theta]))
+        return SO3.exp(jnp.stack([0 * theta, 0 * theta, theta], axis=-1))
 
     @staticmethod
     def from_rpy_radians(
@@ -90,11 +110,10 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         Returns:
             Output.
         """
-        return (
-            SO3.from_z_radians(yaw)
-            @ SO3.from_y_radians(pitch)
-            @ SO3.from_x_radians(roll)
-        )
+        Ty = SO3.from_z_radians(yaw)
+        Tp = SO3.from_y_radians(pitch)
+        Tr = SO3.from_x_radians(roll)
+        return autobatch(lambda y, p, r: y @ p @ r)(Ty, Tp, Tr)
 
     @staticmethod
     def from_quaternion_xyzw(xyzw: hints.Array) -> SO3:
@@ -109,12 +128,12 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         Returns:
             Output.
         """
-        assert xyzw.shape == (4,)
-        return SO3(jnp.roll(xyzw, shift=1))
+        assert xyzw.shape[-1] == 4
+        return SO3(jnp.roll(xyzw, shift=1, axis=-1))
 
     def as_quaternion_xyzw(self) -> jax.Array:
         """Grab parameters as xyzw quaternion."""
-        return jnp.roll(self.wxyz, shift=-1)
+        return jnp.roll(self.wxyz, shift=-1, axis=-1)
 
     def as_rpy_radians(self) -> hints.RollPitchYaw:
         """Computes roll, pitch, and yaw angles. Uses the ZYX mobile robot convention.
@@ -135,7 +154,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
             Euler angle in radians.
         """
         # https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_conversion
-        q0, q1, q2, q3 = self.wxyz
+        q0, q1, q2, q3 = jnp.moveaxis(self.wxyz, -1, 0)
         return jnp.arctan2(2 * (q0 * q1 + q2 * q3), 1 - 2 * (q1**2 + q2**2))
 
     def compute_pitch_radians(self) -> jax.Array:
@@ -145,7 +164,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
             Euler angle in radians.
         """
         # https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_conversion
-        q0, q1, q2, q3 = self.wxyz
+        q0, q1, q2, q3 = jnp.moveaxis(self.wxyz, -1, 0)
         return jnp.arcsin(2 * (q0 * q2 - q3 * q1))
 
     def compute_yaw_radians(self) -> jax.Array:
@@ -155,7 +174,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
             Euler angle in radians.
         """
         # https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Quaternion_to_Euler_angles_conversion
-        q0, q1, q2, q3 = self.wxyz
+        q0, q1, q2, q3 = jnp.moveaxis(self.wxyz, -1, 0)
         return jnp.arctan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2**2 + q3**2))
 
     # Factory.
@@ -166,6 +185,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         return SO3(wxyz=jnp.array([1.0, 0.0, 0.0, 0.0]))
 
     @staticmethod
+    @partial(autobatch, data_rank=2)
     @override
     def from_matrix(matrix: hints.Array) -> SO3:
         assert matrix.shape == (3, 3)
@@ -266,6 +286,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     # Accessors.
 
+    @autobatch
     @override
     def as_matrix(self) -> jax.Array:
         norm = self.wxyz @ self.wxyz
@@ -287,28 +308,33 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def apply(self, target: hints.Array) -> jax.Array:
-        assert target.shape == (3,)
+        assert target.shape[-1] == 3
 
         # Compute using quaternion multiplys.
-        padded_target = jnp.concatenate([jnp.zeros(1), target])
-        return (self @ SO3(wxyz=padded_target) @ self.inverse()).wxyz[1:]
+        padded_target = jnp.concatenate([0 * target[..., :1], target], axis=-1)
+        return (self @ SO3(wxyz=padded_target) @ self.inverse()).wxyz[..., 1:]
 
     @override
     def multiply(self, other: SO3) -> SO3:
-        w0, x0, y0, z0 = self.wxyz
-        w1, x1, y1, z1 = other.wxyz
+        # Bring the quaternion (w,x,y,z) from the innermost to the outermost dimension
+        w0, x0, y0, z0 = jnp.moveaxis(self.wxyz, -1, 0)
+        w1, x1, y1, z1 = jnp.moveaxis(other.wxyz, -1, 0)
+        # Outer product of batch dimensions
+        op = lambda a, b: jnp.reshape(jnp.outer(a, b), (*a.shape, *b.shape))
         return SO3(
-            wxyz=jnp.array(
+            jnp.stack(
                 [
-                    -x0 * x1 - y0 * y1 - z0 * z1 + w0 * w1,
-                    x0 * w1 + y0 * z1 - z0 * y1 + w0 * x1,
-                    -x0 * z1 + y0 * w1 + z0 * x1 + w0 * y1,
-                    x0 * y1 - y0 * x1 + z0 * w1 + w0 * z1,
-                ]
+                    -op(x0, x1) - op(y0, y1) - op(z0, z1) + op(w0, w1),
+                    +op(x0, w1) + op(y0, z1) - op(z0, y1) + op(w0, x1),
+                    -op(x0, z1) + op(y0, w1) + op(z0, x1) + op(w0, y1),
+                    +op(x0, y1) - op(y0, x1) + op(z0, w1) + op(w0, z1),
+                ],
+                axis=-1,
             )
         )
 
     @staticmethod
+    @autobatch
     @override
     def exp(tangent: hints.Array) -> SO3:
         # Reference:
@@ -352,6 +378,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
             )
         )
 
+    @autobatch
     @override
     def log(self) -> jax.Array:
         # Reference:
@@ -385,7 +412,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
             ),
         )
 
-        return atan_factor * self.wxyz[1:]
+        return atan_factor * self.wxyz[..., 1:]
 
     @override
     def adjoint(self) -> jax.Array:
@@ -398,7 +425,7 @@ class SO3(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def normalize(self) -> SO3:
-        return SO3(wxyz=self.wxyz / jnp.linalg.norm(self.wxyz))
+        return SO3(wxyz=self.wxyz / jnp.linalg.norm(self.wxyz, axis=-1, keepdims=True))
 
     @staticmethod
     @override

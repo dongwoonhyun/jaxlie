@@ -4,9 +4,10 @@ import jax
 import jax_dataclasses as jdc
 from jax import numpy as jnp
 from typing_extensions import Annotated, override
+from functools import partial
 
 from . import _base, hints
-from .utils import register_lie_group
+from .utils import register_lie_group, autobatch
 
 
 @register_lie_group(
@@ -33,8 +34,24 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def __repr__(self) -> str:
-        unit_complex = jnp.round(self.unit_complex, 5)
-        return f"{self.__class__.__name__}(unit_complex={unit_complex})"
+        """Pretty-printing."""
+        unit_complex = jnp.reshape(jnp.round(self.unit_complex, 5), (-1, 2))
+        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
+        # If size is too large, only print the first and last few elements
+        n = unit_complex.shape[0]
+        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
+        for r in ranges:
+            if r is None:
+                str += "\n..."
+            else:
+                # Print each element in the batch
+                for i in r:
+                    str += "\n%5d: unit_complex=[" % i
+                    for u in unit_complex[i]:
+                        str += " %+7.4f, " % u
+                    str = str[:-2] + "], "
+        str = str[:-2] + ")"
+        return str
 
     @staticmethod
     def from_radians(theta: hints.Scalar) -> SO2:
@@ -56,6 +73,7 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         return SO2(unit_complex=jnp.array([1.0, 0.0]))
 
     @staticmethod
+    @partial(autobatch, data_rank=2)
     @override
     def from_matrix(matrix: hints.Array) -> SO2:
         assert matrix.shape == (2, 2)
@@ -63,6 +81,7 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     # Accessors.
 
+    @autobatch
     @override
     def as_matrix(self) -> jax.Array:
         cos_sin = self.unit_complex
@@ -85,14 +104,16 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def apply(self, target: hints.Array) -> jax.Array:
-        assert target.shape == (2,)
-        return self.as_matrix() @ target  # type: ignore
+        assert target.shape[-1] == 2
+        return jnp.tensordot(self.as_matrix(), target, axes=(-1, -1))
+        # return self.as_matrix() @ target  # type: ignore
 
     @override
     def multiply(self, other: SO2) -> SO2:
-        return SO2(unit_complex=self.as_matrix() @ other.unit_complex)
+        return SO2(unit_complex=self.apply(other.unit_complex))
 
     @staticmethod
+    @autobatch
     @override
     def exp(tangent: hints.Array) -> SO2:
         (theta,) = tangent
@@ -100,6 +121,7 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
         sin = jnp.sin(theta)
         return SO2(unit_complex=jnp.array([cos, sin]))
 
+    @autobatch
     @override
     def log(self) -> jax.Array:
         return jnp.arctan2(
@@ -116,7 +138,10 @@ class SO2(jdc.EnforcedAnnotationsMixin, _base.SOBase):
 
     @override
     def normalize(self) -> SO2:
-        return SO2(unit_complex=self.unit_complex / jnp.linalg.norm(self.unit_complex))
+        return SO2(
+            unit_complex=self.unit_complex
+            / jnp.linalg.norm(self.unit_complex, axis=-1, keepdims=True)
+        )
 
     @staticmethod
     @override

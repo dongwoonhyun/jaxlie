@@ -4,10 +4,11 @@ import jax
 import jax_dataclasses as jdc
 from jax import numpy as jnp
 from typing_extensions import Annotated, override
+from functools import partial
 
 from . import _base, hints
 from ._so2 import SO2
-from .utils import get_epsilon, register_lie_group
+from .utils import get_epsilon, register_lie_group, autobatch
 
 
 @register_lie_group(
@@ -39,7 +40,33 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
         xy = jnp.round(self.unit_complex_xy[..., 2:], 5)
         return f"{self.__class__.__name__}(unit_complex={unit_complex}, xy={xy})"
 
+    @override
+    def __repr__(self) -> str:
+        """Pretty-printing."""
+        unit_complex = jnp.reshape(jnp.round(self.unit_complex_xy[..., :2], 5), (-1, 2))
+        xy = jnp.reshape(jnp.round(self.unit_complex_xy[..., 2:], 5), (-1, 2))
+        str = f"{self.__class__.__name__}(batch_axes={self.get_batch_axes()},"
+        # If size is too large, only print the first and last few elements
+        n = unit_complex.shape[0]
+        ranges = [range(n)] if n <= 10 else [range(5), None, range(n - 4, n)]
+        for r in ranges:
+            if r is None:
+                str += "\n..."
+            else:
+                # Print each element in the batch
+                for i in r:
+                    str += "\n%5d: unit_complex=[" % i
+                    for u in unit_complex[i]:
+                        str += " %+7.4f, " % u
+                    str = str[:-2] + "], xy=["
+                    for x in xy[i]:
+                        str += " %+7.4f, " % x
+                    str = str[:-2] + "], "
+        str = str[:-2] + ")"
+        return str
+
     @staticmethod
+    @autobatch
     def from_xy_theta(x: hints.Scalar, y: hints.Scalar, theta: hints.Scalar) -> "SE2":
         """Construct a transformation from standard 2D pose parameters.
 
@@ -52,14 +79,15 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
     # SE-specific.
 
     @staticmethod
+    @autobatch
     @override
     def from_rotation_and_translation(
         rotation: SO2,
         translation: hints.Array,
     ) -> "SE2":
-        assert translation.shape == (2,)
+        assert translation.shape[-1] == 2
         return SE2(
-            unit_complex_xy=jnp.concatenate([rotation.unit_complex, translation])
+            unit_complex_xy=jnp.concatenate([rotation.unit_complex, translation], -1)
         )
 
     @override
@@ -78,6 +106,7 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
         return SE2(unit_complex_xy=jnp.array([1.0, 0.0, 0.0, 0.0]))
 
     @staticmethod
+    @partial(autobatch, data_rank=2)
     @override
     def from_matrix(matrix: hints.Array) -> "SE2":
         assert matrix.shape == (3, 3)
@@ -93,6 +122,7 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
     def parameters(self) -> jax.Array:
         return self.unit_complex_xy
 
+    @autobatch
     @override
     def as_matrix(self) -> jax.Array:
         cos, sin, x, y = self.unit_complex_xy
@@ -107,6 +137,7 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
     # Operations.
 
     @staticmethod
+    @autobatch
     @override
     def exp(tangent: hints.Array) -> "SE2":
         # Reference:
@@ -159,6 +190,7 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
             translation=V @ tangent[:2],
         )
 
+    @autobatch
     @override
     def log(self) -> jax.Array:
         # Reference:
@@ -199,6 +231,7 @@ class SE2(jdc.EnforcedAnnotationsMixin, _base.SEBase[SO2]):
         tangent = jnp.concatenate([V_inv @ self.translation(), theta[None]])
         return tangent
 
+    @autobatch
     @override
     def adjoint(self: "SE2") -> jax.Array:
         cos, sin, x, y = self.unit_complex_xy

@@ -96,3 +96,27 @@ def reshape(obj, batch_shape, data_rank=1):
             for f in jdc.fields(obj)
         }
     )
+
+
+def stack(objs, axis=0, data_rank=1):
+    """Stack a list of objects into a single object with an extra batch dimension."""
+    if axis < 0:  # For negative axis, skip over data dimensions.
+        axis -= data_rank
+    return objs[0].__class__(
+        **{
+            f.name: jnp.stack([o.__dict__[f.name] for o in objs], axis=axis)
+            for f in jdc.fields(objs[0])
+        }
+    )
+
+
+def concatenate(objs, axis=0, data_rank=1):
+    """Concatenate a list of objects into a single object with an extra batch dimension."""
+    if axis < 0:  # For negative axis, skip over data dimensions.
+        axis -= data_rank
+    return objs[0].__class__(
+        **{
+            f.name: jnp.concatenate([o.__dict__[f.name] for o in objs], axis=axis)
+            for f in jdc.fields(objs[0])
+        }
+    )
