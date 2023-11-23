@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Callable, Type, TypeVar
 import jax
 import jax_dataclasses as jdc
 from jax import numpy as jnp
-from jax import vmap
+from jax import vmap, lax
 from functools import wraps
 
 if TYPE_CHECKING:
@@ -66,22 +66,32 @@ def is_batched(*args, data_rank=1, **kwargs):
 
     data_rank is the rank of the underlying data (i.e. non-batch dimensions)."""
     for arg in list(args) + list(kwargs.values()):
-        if isinstance(arg, jnp.ndarray):
+        if isinstance(arg, jax.Array):
             return len(arg.shape) > data_rank
         elif isinstance(arg, jdc.EnforcedAnnotationsMixin):
             return len(arg.get_batch_axes()) > 0
     raise ValueError("No arrays found in arguments.")
 
 
-def autobatch(fn, data_rank=1):
-    """Magical method decorator to automatically vmap over any batch dimensions."""
+def autobatch(fn, data_rank=1, use_vmap=True):
+    """Magical method decorator to automatically batch over any batch dimensions.
+
+    vmap is useful for vectorizing small batch dimensions, but requires a lot of memory.
+    lax.map is slower but uses less memory.
+    """
 
     @wraps(fn)
     def wrapped(*args, **kwargs):
         if is_batched(*args, data_rank=data_rank, **kwargs):
-            return vmap(lambda a, k: wrapped(*a, **k))(args, kwargs)
+            if use_vmap:
+                return vmap(lambda a, k: wrapped(*a, **k))(args, kwargs)
+            else:
+                return lax.map(lambda x: wrapped(*x[0], **x[1]), (args, kwargs))
         else:
-            return fn(*args, **kwargs)
+            if use_vmap:
+                return fn(*args, **kwargs)
+            else:
+                return jax.checkpoint(fn)(*args, **kwargs)
 
     return wrapped
 
