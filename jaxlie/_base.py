@@ -293,7 +293,6 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
             Constructed transformation.
         """
 
-    @final
     @classmethod
     def from_rotation(cls: Type[SEGroupType], rotation: ContainedSOType) -> SEGroupType:
         return cls.from_rotation_and_translation(
@@ -301,7 +300,6 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
             translation=onp.zeros(cls.space_dim, dtype=rotation.parameters().dtype),
         )
 
-    @final
     @classmethod
     def from_translation(
         cls: Type[SEGroupType], translation: hints.Array
