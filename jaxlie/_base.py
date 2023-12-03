@@ -7,7 +7,7 @@ from typing_extensions import final, override
 import jax_dataclasses as jdc
 
 from . import hints
-from .utils import autobatch
+from .utils import autobatch, tile
 
 GroupType = TypeVar("GroupType", bound="MatrixLieGroup")
 SEGroupType = TypeVar("SEGroupType", bound="SEBase")
@@ -86,7 +86,10 @@ class MatrixLieGroup(abc.ABC):
                     for n, d in data.items():
                         str += "%s=[" % n
                         for e in d[i]:
-                            str += " %+7.4f, " % e
+                            try:  # When a concrete value, print value
+                                str += " %+7.4f, " % e
+                            except:  # When an abstract tracer, print dtype
+                                str += " %7s, " % e.dtype
                         str = str[:-2] + "], "
         str = str[:-2] + ")"
         return str
@@ -296,6 +299,17 @@ class SEBase(Generic[ContainedSOType], MatrixLieGroup):
         return cls.from_rotation_and_translation(
             rotation=rotation,
             translation=onp.zeros(cls.space_dim, dtype=rotation.parameters().dtype),
+        )
+
+    @final
+    @classmethod
+    def from_translation(
+        cls: Type[SEGroupType], translation: hints.Array
+    ) -> SEGroupType:
+        batch_axes = translation.shape[:-1]
+        return cls.from_rotation_and_translation(
+            rotation=tile(cls.identity().rotation().__class__.identity(), batch_axes),
+            translation=translation,
         )
 
     @abc.abstractmethod
