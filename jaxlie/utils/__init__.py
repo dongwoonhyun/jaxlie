@@ -5,6 +5,7 @@ from ._utils import (
     reshape,
     stack,
     concatenate,
+    tile,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "reshape",
     "stack",
     "concatenate",
+    "tile",
 ]

@@ -130,3 +130,11 @@ def concatenate(objs, axis=0, data_rank=1):
             for f in jdc.fields(objs[0])
         }
     )
+
+
+def tile(obj, reps, data_rank=1):
+    """Tile an object along the batch dimensions."""
+    reps = tuple(reps) + (1,) * data_rank  # Add data dimensions
+    return obj.__class__(
+        **{f.name: jnp.tile(obj.__dict__[f.name], reps) for f in jdc.fields(obj)}
+    )
